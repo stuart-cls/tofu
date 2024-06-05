@@ -1,6 +1,4 @@
 import logging
-import glob
-import os
 from gi.repository import Ufo
 from tofu.util import (
     get_filtering_padding,
@@ -8,7 +6,8 @@ from tofu.util import (
     determine_shape,
     read_image,
     setup_read_task,
-    setup_padding
+    setup_padding,
+    write_image
 )
 from tofu.tasks import get_task, get_writer
 
@@ -21,29 +20,72 @@ def find_large_spots_median(args):
     import skimage.morphology as sm
     import tifffile
     from skimage.filters import median
+    from skimage.measure import label
+    from skimage.restoration import estimate_sigma
     from scipy.ndimage import binary_fill_holes
 
-    if os.path.isfile(args.images):
-        filenames = [args.images]
-    else:
-        filenames = sorted(glob.glob(os.path.join(args.images, '*.*')))
-    if not filenames:
-        raise RuntimeError("No images found in `{}'".format(args.images))
-    image = read_image(filenames[0])
-    if image.ndim == 3:
-        image = np.mean(image, axis=0)
+    images = read_image(args.images, allow_multi=True)
+    if args.averaging_mode == "first":
+        image = images[0]
+    if args.averaging_mode == "mean":
+        image = np.mean(images, axis=0)
+    if args.averaging_mode == "median":
+        image = np.median(images, axis=0)
+
     mask = np.zeros_like(image, dtype=np.uint8)
 
-    med = median(image, [np.ones(args.median_width)])
+    if args.median_direction == 'both':
+        kernel = sm.disk(args.median_width // 2)
+    else:
+        kernel = np.ones(args.median_width)
+        if args.median_direction == 'vertical':
+            kernel = kernel[:, np.newaxis]
+        else:
+            kernel = kernel[np.newaxis]
 
-    # First, pixels which are too bright are marked
-    mask[image > args.spot_threshold] = 1
-    # Then the ones which are way brighter than the neighborhood
-    mask[np.abs(image.astype(float) - med) > args.grow_threshold] = 1
+    med = median(image, kernel)
+    diff = image.astype(float) - med
+    if args.spot_threshold_mode == "absolute":
+        diff = np.abs(diff)
+    elif args.spot_threshold_mode == "below":
+        diff = -diff
+
+    if args.blurred_output:
+        tifffile.imsave(args.blurred_output, diff.astype(image.dtype))
+
+    if args.spot_threshold == 0:
+        hist, bins = np.histogram(diff, bins=256)
+        pdf = hist / diff.size
+        args.spot_threshold = bins[np.where(np.cumsum(pdf) > 0.99)][0]
+        LOG.info(f"Automatically determined spot-threshold: {args.spot_threshold}")
+
+    if args.grow_threshold == 0:
+        # 4.29 for FWTM
+        args.grow_threshold = 4.29 * estimate_sigma(diff)
+        LOG.info(f"Automatically determined grow-threshold: {args.grow_threshold}")
+
+    # First, pixels which are above threshold are marked
+    mask[diff > args.spot_threshold] = 1
+    label_high = label(mask)
+
+    # Then the ones which are connected to the bright ones and above a lower threshold
+    mask_low = np.zeros_like(mask)
+    mask_low[diff > args.grow_threshold] = 1
+    label_low = label(mask_low)
+    mask_low[:] = 0
+
+    for i in range(1, label_high.max() + 1):
+        indices = np.where(label_high == i)
+        low_i = label_low[indices].max()
+        low_indices = np.where(label_low == low_i)
+        if len(low_indices[0]) <= args.max_spot_size:
+            mask_low[low_indices] = 1
+
+    mask = sm.dilation(mask_low, sm.disk(args.dilation_disk_radius))
     mask = binary_fill_holes(mask)
-    mask = sm.dilation(mask, sm.disk(args.dilation_disk_radius))
 
-    tifffile.imsave(args.output, mask.astype(np.float32))
+
+    write_image(args.output, mask.astype(np.float32))
 
 
 def find_large_spots(args):
