@@ -13,7 +13,9 @@ from PyQt5.QtWidgets import (
     QLineEdit,
 )
 from PyQt5.QtCore import QCoreApplication, QTimer, pyqtSignal, Qt
-from tofu.ez.main import execute_reconstruction, clean_tmp_dirs
+
+from tofu.ez.GUI.Main.remote import get_execute
+from tofu.ez.main import clean_tmp_dirs
 from tofu.ez.util import import_values, export_values, get_fdt_names
 from tofu.ez.GUI.message_dialog import warning_message
 from tofu.ez.params import EZVARS, EZVARS_aux
@@ -616,8 +618,9 @@ class ConfigGroup(QGroupBox):
         QTimer.singleShot(100, run_reco)
 
     def run_reconstruction(self, batch_run):
+        exec = get_execute()
         try:            
-            s = execute_reconstruction()
+            s = exec()
             if s:
                 msg = f"Processed {s} sets. See output in terminal for details."
             else:
