@@ -14,8 +14,9 @@ from PyQt5.QtWidgets import (
 )
 from PyQt5.QtCore import QCoreApplication, QTimer, pyqtSignal, Qt
 
+from tofu.ez.GUI.Main.remote import get_execute
+from tofu.ez.main import clean_tmp_dirs
 from tofu.ez.GUI.verify_delete import verify_safe2delete
-from tofu.ez.main import execute_reconstruction, clean_tmp_dirs
 from tofu.ez.util import import_values, export_values, get_fdt_names
 from tofu.ez.GUI.message_dialog import warning_message
 from tofu.ez.params import EZVARS, EZVARS_aux
@@ -628,8 +629,9 @@ class ConfigGroup(QGroupBox):
         QTimer.singleShot(100, run_reco)
 
     def run_reconstruction(self, batch_run):
+        exec = get_execute()
         try:
-            num_proc_sets = execute_reconstruction()
+            num_proc_sets = exec()
             msg = f"Processed {num_proc_sets} sets. See output in terminal for details."
             QMessageBox.information(self, "Finished", msg)
             if not EZVARS['inout']['dryrun']['value']:
