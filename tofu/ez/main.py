@@ -356,4 +356,5 @@ def execute_from_params(params):
     load_values_from_ezdefault(EZVARS_aux)
     LOG.debug("Import YAML Path: " + params.ezvars)
     import_values(params.ezvars, ['ezvars', 'tofu', 'ezvars_aux'])
-    execute_reconstruction()
+    s = execute_reconstruction()
+    print(f"*** Processed {s} sets.")
