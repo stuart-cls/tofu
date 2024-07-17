@@ -261,8 +261,8 @@ def execute_reconstruction():
     num_proc_sets = 0
     for i, ctset in enumerate(W):
         # ctset is a tuple containing a path and a type (3 or 4)
-        if not already_recd(ctset[0], lvl0, recd_sets):
-            setid = ctset[0][len(lvl0) + 1:]
+        setid = os.path.relpath(ctset[0], lvl0)
+        if not setid in recd_sets:
             num_proc_sets += 1
             # determine initial number of projections and their shape
             path2proj = os.path.join(ctset[0], fdt_names[2])
@@ -378,19 +378,11 @@ def execute_reconstruction():
     return num_proc_sets
 
 
-def already_recd(ctset, indir, recd_sets):
-    x = False
-    if ctset[len(indir) + 1 :] in recd_sets:
-        x = True
-    return x
-
-
 def findSlicesDirs(lvl0):
     recd_sets = []
     for root, dirs, files in os.walk(lvl0):
-        for name in dirs:
-            if name == "sli":
-                recd_sets.append(root[len(lvl0) + 1 :])
+        if "sli" in dirs:
+            recd_sets.append(os.path.relpath(root, lvl0))
     return recd_sets
 
 
