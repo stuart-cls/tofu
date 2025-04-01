@@ -6,8 +6,13 @@ import logging
 import math
 import os
 from collections import OrderedDict
-gi.require_version('Ufo', '0.0')
-from gi.repository import Ufo
+try:
+    gi.require_version('Ufo', '0.0')
+    from gi.repository import Ufo
+except ModuleNotFoundError as e:
+    print(str(e))
+except ValueError as e:
+    print(str(e))
 
 LOG = logging.getLogger(__name__)
 RESOURCES = None
@@ -106,6 +111,9 @@ def restrict_value(limits, dtype=float):
                 raise argparse.ArgumentTypeError('Value cannot be greater than {}'.format(limits[1]))
         return result
 
+    check.dtype = dtype
+    check.limits = limits
+
     return check
 
 
@@ -151,6 +159,8 @@ def tupleize(num_items=None, conv=float, dtype=tuple):
             raise argparse.ArgumentTypeError('Expected {} items'.format(num_items))
 
         return result
+
+    split_values.dtype = conv
 
     return split_values
 
