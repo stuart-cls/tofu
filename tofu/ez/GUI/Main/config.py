@@ -632,7 +632,7 @@ class ConfigGroup(QGroupBox):
             if not EZVARS['inout']['dryrun']['value']:
                 self.signal_reco_done.emit()
             EZVARS['inout']['dryrun']['value'] = bool(False)
-        except InvalidInputError as err:
+        except (InvalidInputError, RuntimeError) as err:
             msg = "Failed to run reconstruction. See output in terminal for details."
             err_arg = err.args
             msg += err.args[0]

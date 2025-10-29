@@ -37,9 +37,13 @@ def remote_reconstruction():
     result = client.single(ezvars=str(param_path))
     result.connect('update', print_log)
     result.wait()
-    for line in reversed(result.results):
-        if line.startswith("*** Processed "):
-            return line.split()[2]
+    if result.results is not None:
+        for line in reversed(result.results):
+            if line.startswith("*** Processed "):
+                return line.split()[2]
+    else:
+        logger.error(f"No reply from remote reconstruction. Check logs in {output_dir}")
+        raise RuntimeError
 
 
 def get_execute():
