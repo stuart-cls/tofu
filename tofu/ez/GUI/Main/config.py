@@ -637,11 +637,15 @@ class ConfigGroup(QGroupBox):
             if not EZVARS['inout']['dryrun']['value']:
                 self.signal_reco_done.emit()
             EZVARS['inout']['dryrun']['value'] = bool(False)
-        except (InvalidInputError, RuntimeError) as err:
+        except InvalidInputError as err:
             msg = "Failed to run reconstruction. See output in terminal for details."
             err_arg = err.args
             msg += err.args[0]
             QMessageBox.information(self, "Invalid Input Error", msg)
+        except RuntimeError as err:
+            msg = "Failed to run reconstruction. See output in terminal for details."
+            QMessageBox.information(self, "Remote Reconstruction Error", msg)
+            LOG.error(err)
 
 
 class InvalidInputError(Exception):
