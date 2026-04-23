@@ -88,7 +88,8 @@ def frmt_ufo_cmds(cmds, ctset, out_pattern, ax, nviews, wh, n_per_pass, reductio
             path2flat = os.path.join(ctset[0],
                                      EZVARS['inout']['path2-shared-flats']['value'])
         medflat_file = os.path.join(EZVARS['inout']['tmp-dir']['value'], "flat-median.tif")
-        imwrite(medflat_file, get_median_flat(path2flat))
+        script_str = "import sys; from tifffile import imwrite; from tofu.ez.util import get_median_flat; imwrite(sys.argv[1], get_median_flat(sys.argv[2]))"
+        cmds.append(f'python -c \'{script_str}\' "{medflat_file}" "{path2flat}"')
     if EZVARS['inout']['preprocess']['value']:
         cmds.append('echo " - Applying filter(s) to images "')
         cmds_prepro = get_pre_cmd(ctset, EZVARS['inout']['preprocess-command']['value'],
@@ -323,9 +324,12 @@ def execute_reconstruction():
             # rm files in temporary directory first of all to
             # format paths correctly and to avoid problems
             # when reconstructing ct sets with variable number of rows or projections
-            cmds.append('echo "Cleaning temporary directory"'.format(setid))
-            clean_tmp_dirs(EZVARS['inout']['tmp-dir']['value'], fdt_names)
+            cmds.append('echo "Cleaning temporary directory"')
+            script_str = "import sys; from tofu.ez.util import clean_tmp_dirs; clean_tmp_dirs(sys.argv[1], sys.argv[2:])"
+            args_str = " ".join(f'"{name}"' for name in fdt_names)
+            cmds.append(f'python -c \'{script_str}\' "{EZVARS["inout"]["tmp-dir"]["value"]}" {args_str}')
             # call function which formats commands for this data set
+            reset_proj_steps()
             nviews, wh = frmt_ufo_cmds(cmds, ctset, out_pattern, ax, nviews, wh, n_per_pass, reduction_mode=reduction_mode)
             save_params(setid, ax, nviews, wh)
             print('{}\t{}'.format('CTset:', ctset[0]))
