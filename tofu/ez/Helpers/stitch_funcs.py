@@ -8,8 +8,11 @@ import os
 import shutil
 import numpy as np
 import tifffile
-from tofu.util import read_image, get_image_shape, get_filenames, TiffSequenceReader, SequenceReaderError
-from tofu.ez.util import get_data_cube_info, add_value_to_dict_entry, get_dims
+
+from tofu.ez.ctdir_walker import substitute_shared_flatsdarks
+from tofu.util import read_image, get_image_shape, TiffSequenceReader, SequenceReaderError, \
+    get_first_filename
+from tofu.ez.util import get_data_cube_info, add_value_to_dict_entry, get_dims, enquote, get_fd_names
 from tofu.ez.image_read_write import get_image_dtype
 import multiprocessing as mp
 from functools import partial
@@ -52,13 +55,13 @@ def make_ort_sections(ctset_path, tmp_dir_path):
     Vsteps = sorted_sub_directories(ctset_path)
     #determine input data type
     tmp = os.path.join(ctset_path, Vsteps[0], EZVARS_aux['vert-sti']['subdir-name']['value'])
-    nslices, N, M, indtype_digit, indtype, npasses = get_data_cube_info(tmp)
+    nslices, N, M, indtype_digit, indtype, npasses, ext = get_data_cube_info(tmp)
 
     indir = ctset_path
     if EZVARS_aux['vert-sti']['ort']['value']:
         print(" - Creating orthogonal sections")
         for vstep in Vsteps:
-            in_name = os.path.join(ctset_path, vstep, EZVARS_aux['vert-sti']['subdir-name']['value'])
+            in_name = enquote(os.path.join(ctset_path, vstep, EZVARS_aux['vert-sti']['subdir-name']['value'], f"*{ext}"))
             out_name = os.path.join(tmp_dir_path,
                                     vstep, EZVARS_aux['vert-sti']['subdir-name']['value'], 'sli-%04i.tif')
             # todo: size check and num-passes argument
@@ -334,20 +337,39 @@ def main_360_mp_depth1(indir, outdir, ax, cro):
             break
     print("========== Done ==========")
 
-def main_360sti_ufol_depth1(indir, outdir, ax, cro):
+def main_360sti_ufol_depth1(indir, outdir, ax, cro,
+                            substitute_subdirs=None,
+                            reduction_mode=None,
+                            fd_names=(),
+                            ):
+    """
+    indir: path to ctset with tomo/flats/darks/flats2 subdirectories
+    outdir: path to output directory
+    ax: overlap value
+    cro: desired crop
+    substitute_subdirs: dictionary of subdirs and replacement paths (used for shared flats/darks)
+    reduction_mode: Flats / darks will be reduced by "average" or "median" before stitching
+    fd_names: Sequence of flats / darks / flats2 subdir names in the input ctset
+    """
+    if substitute_subdirs is None:
+        substitute_subdirs = {}
+
     if not os.path.exists(outdir):
         os.makedirs(outdir)
 
-    subdirs = sorted_sub_directories(indir)
+    subdirs_list = sorted_sub_directories(indir)
+    subdirs = {sd: os.path.join(indir, sd) for sd in subdirs_list}
+    subdirs.update(substitute_subdirs)
 
-    for i, sdir in enumerate(subdirs):
+    for sdir, inpath in subdirs.items():
         print(f"Stitching images in {sdir}")
-        inpath = os.path.join(indir, sdir)
+        if sdir in substitute_subdirs:
+            print(f"Using shared path for {sdir}: {inpath}")
         numfiles = len(sorted(glob.glob(os.path.join(inpath, '*.tif'))))
         tfs = TiffSequenceReader(inpath)
         numim = tfs.num_images
-        if numim < 2:
-            print("Warning: less than 2 images, skipping this dir")
+        if numim < 1:
+            print("Warning: no images, skipping this dir")
             continue
         if (numfiles > 1) and (numfiles != numim):
             print("Warning: cannot work with several bigtiff files. Input must be either"
@@ -356,8 +378,17 @@ def main_360sti_ufol_depth1(indir, outdir, ax, cro):
         bigtiff = False
         if numfiles == 1:
             bigtiff = True
-        numpairs = numim // 2
-        print(f"{numpairs} pairs will be stitched in {sdir}")
+        if reduction_mode is not None and sdir in fd_names:
+            numpairs = numim
+            current_reduction_mode = reduction_mode
+            print(f"{current_reduction_mode} of {numpairs} images will be stitched for {sdir}")
+        else:
+            numpairs = numim // 2
+            current_reduction_mode = None
+            if numpairs:
+                print(f"{numpairs} pairs will be stitched in {sdir}")
+            elif numpairs == 0:
+                print(f"Single image in {sdir}, duplicating.")
         im = tfs.read(0)
         tfs.close()
         h, w = im.shape
@@ -365,12 +396,24 @@ def main_360sti_ufol_depth1(indir, outdir, ax, cro):
         if im.dtype == 'uint8':
             bits = 8
         elif im.dtype == 'uint16':
-            bits = 16,
+            bits = 16
         outpath = os.path.join(outdir, sdir)
-        cmd = fmt_stitch_cmd(inpath, bigtiff, bits, outpath, numpairs, w, ax, cro)
+        cmd = fmt_stitch_cmd(inpath, bigtiff, bits, outpath, numpairs, w, ax, cro, current_reduction_mode)
         #print(cmd)
         os.system(cmd)
 
+def compute_crop(dax, image_shape):
+    """Compute the crop values required to output matching image widths after stitching
+
+    Required for vertical stitching after reconstruction.
+
+    Returns a sequence of crop values the same length as dax
+    """
+    cra = np.max(dax) - dax
+    M = image_shape[-1]
+    if np.min(dax) > M//2:
+        cra = dax - np.min(dax)
+    return cra
 
 def main_360_mp_depth2():
     ctdirs, lvl0 = findCTdirs(EZVARS_aux['stitch360']['input-dir']['value'],
@@ -390,10 +433,7 @@ def main_360_mp_depth2():
               f"180-deg parallel-beam scans")
         return
 
-    tmp = len(EZVARS_aux['stitch360']['input-dir']['value'])
-    ctdirs_rel_paths = []
-    for i in range(num_sets):
-        ctdirs_rel_paths.append(ctdirs[i][tmp+1:len(ctdirs[i])])
+    ctdirs_rel_paths = [os.path.relpath(ctdir, start=EZVARS_aux['stitch360']['input-dir']['value']) for ctdir in ctdirs]
     print(f"Found the {num_sets} directories in the input with relative paths: {ctdirs_rel_paths}")
 
     # make_ort_sections axis and crop arrays
@@ -407,14 +447,15 @@ def main_360_mp_depth2():
             dax[i] = int(dax[i])
     print(f'Overlaps: {dax}')
     # compute crop:
-    cra = np.max(dax)-dax
     # Axis on the right ? Must open one file to find out ><
-    tmpname = os.path.join(EZVARS_aux['stitch360']['input-dir']['value'], ctdirs_rel_paths[0])
-    subdirs = sorted_sub_directories(tmpname)
-    M = get_image_shape(get_filenames(os.path.join(tmpname, subdirs[0]))[0])[-1]
-    if np.min(dax) > M//2:
-        cra = dax - np.min(dax)
+    first_tomo_dir = os.path.join(ctdirs[0], EZVARS['inout']['tomo-dir']['value'])
+    image_shape = get_image_shape(get_first_filename(first_tomo_dir))
+    cra = compute_crop(dax, image_shape)
     print(f'Crop by: {cra}')
+
+    substitute_subdirs = substitute_shared_flatsdarks()
+    reduction_mode = EZVARS['flat-correction']['reduction-mode']['value']
+    fd_names = get_fd_names()
 
     for i, ctdir in enumerate(ctdirs):
         print("================================================================")
@@ -424,7 +465,11 @@ def main_360_mp_depth2():
         #main_360_mp_depth1
         main_360sti_ufol_depth1(ctdir,
             os.path.join(EZVARS_aux['stitch360']['output-dir']['value'], ctdirs_rel_paths[i]),
-                           int(dax[i]), int(cra[i]))
+                           int(dax[i]), int(cra[i]),
+                                substitute_subdirs=substitute_subdirs,
+                                reduction_mode=reduction_mode,
+                                fd_names=fd_names,
+                                )
 
         # print(ctdir, os.path.join(parameters['360multi_output_dir'], ctdirs_rel_paths[i]), dax[i], cra[i])
 
