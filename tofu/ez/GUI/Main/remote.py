@@ -38,9 +38,7 @@ def remote_reconstruction():
     result.connect('update', print_log)
     result.wait()
     if result.results is not None:
-        for line in reversed(result.results):
-            if line.startswith("*** Processed "):
-                return line.split()[2]
+        return sum(1 for line in result.results if line.startswith(">>>>> PROCESSING"))
     else:
         logger.error(f"No reply from remote reconstruction. Check logs in {output_dir}")
         raise RuntimeError
