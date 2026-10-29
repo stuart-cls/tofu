@@ -18,7 +18,7 @@ else:
 
 
 def print_log(res, data):
-    print(data, end="")
+    print(data)
 
 
 def remote_reconstruction():
