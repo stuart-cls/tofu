@@ -50,12 +50,18 @@ def make_ort_sections(ctset_path, tmp_dir_path):
     Returns the original path if orthogonal sections are not generated, otherwise returns the path to the orthogonal sections.
     :param ctset_path: Path to the directory containing the vertical views (one CTDir with Z00-Z0N subdirs)
     :param tmp_dir_path: Path to the temporary directory where the orthogonal sections will be stored.
-    :return: Path to the directory containing the orthogonal sections and dtype of the input images
+    :return: Path to the directory containing the orthogonal sections, dtype of the input
+        images, and the stop clamped to this CT set's own slice height
     """
     Vsteps = sorted_sub_directories(ctset_path)
     #determine input data type
     tmp = os.path.join(ctset_path, Vsteps[0], EZVARS_aux['vert-sti']['subdir-name']['value'])
     nslices, N, M, indtype_digit, indtype, npasses, ext = get_data_cube_info(tmp)
+
+    # Different CT sets may have different slice heights (e.g. after half-acq
+    # stitching with a per-CT-set crop). Clamp the requested stop to this CT
+    # set's own height so the sinos vertical ROI never exceeds the input.
+    local_stop = min(EZVARS_aux['vert-sti']['stop']['value'], N)
 
     indir = ctset_path
     if EZVARS_aux['vert-sti']['ort']['value']:
@@ -66,8 +72,8 @@ def make_ort_sections(ctset_path, tmp_dir_path):
                                     vstep, EZVARS_aux['vert-sti']['subdir-name']['value'], 'sli-%04i.tif')
             # todo: size check and num-passes argument
             cmd = 'tofu sinos --projections {} --output {}'.format(in_name, out_name)
-            cmd += " --y {} --height {} --y-step {}".format(EZVARS_aux['vert-sti']['start']['value'], 
-                        EZVARS_aux['vert-sti']['stop']['value'] - EZVARS_aux['vert-sti']['start']['value'],
+            cmd += " --y {} --height {} --y-step {}".format(EZVARS_aux['vert-sti']['start']['value'],
+                        local_stop - EZVARS_aux['vert-sti']['start']['value'],
                         EZVARS_aux['vert-sti']['step']['value'])
             cmd += " --output-bytes-per-file 0"
             if indtype_digit == '8' or indtype_digit == '16':
@@ -77,7 +83,7 @@ def make_ort_sections(ctset_path, tmp_dir_path):
             os.system(cmd)
             time.sleep(10)
         indir = tmp_dir_path
-    return indir, indtype
+    return indir, indtype, local_stop
 
 def sorted_sub_directories(path: os.PathLike) -> list[str]:
     """Return a sorted list of sub-directories sorted by sub-directory name"""
@@ -122,9 +128,10 @@ def validate_slice_range():
             tmp = EZVARS_aux['vert-sti']['start']['value']
             EZVARS_aux['vert-sti']['start']['value'] = EZVARS_aux['vert-sti']['stop']['value']
             EZVARS_aux['vert-sti']['stop']['value'] = tmp
-
-        if EZVARS_aux['vert-sti']['stop']['value'] > N:
-            EZVARS_aux['vert-sti']['stop']['value'] = N
+        # Intentionally do NOT clamp stop to this (first) CT set's height N here.
+        # Different CT sets may have different slice heights (e.g. after half-acq
+        # stitching with a per-CT-set crop); make_ort_sections clamps the stop to
+        # each CT set's own height before generating the orthogonal sections.
 
 def load_an_image_from_the_input_dir(input_dir, slice_dir):
     return 0
@@ -191,7 +198,7 @@ def main_sti_mp():
 
 
 def sti_one_set(in_dir_path, tmp_dir_path, out_dir_path):
-    indir, indtype = make_ort_sections(in_dir_path, tmp_dir_path)
+    indir, indtype, local_stop = make_ort_sections(in_dir_path, tmp_dir_path)
     outfilepattern = os.path.join(out_dir_path, EZVARS_aux['vert-sti']['subdir-name']['value'] + '-sti-{:>04}.tif')
     if EZVARS_aux['vert-sti']['estimate_num_olap_rows']['value']:
         olap = find_vert_olap_2_vsteps(in_dir_path,
@@ -210,7 +217,7 @@ def sti_one_set(in_dir_path, tmp_dir_path, out_dir_path):
         raise ValueError(f"Vertical overlap {dx} larger than input image height {N}")
     ramp = np.linspace(0, 1, dx)
 
-    J = range((EZVARS_aux['vert-sti']['stop']['value'] - EZVARS_aux['vert-sti']['start']['value']) //
+    J = range((local_stop - EZVARS_aux['vert-sti']['start']['value']) //
               EZVARS_aux['vert-sti']['step']['value'])
     pool = mp.Pool(processes=mp.cpu_count())
     exec_func = partial(exec_sti_mp, indir, outfilepattern, N, Nnew, Vsteps, dx, M, ramp, indtype)
@@ -265,12 +272,12 @@ def exec_sti_mp(indir, pout, N, Nnew, Vsteps, dx, M, ramp, indtype, j):
 
 
 def conc_one_set(in_dir_path, tmp_dir_path, out_dir_path):
-    indir, indtype = make_ort_sections(in_dir_path, tmp_dir_path)
+    indir, indtype, local_stop = make_ort_sections(in_dir_path, tmp_dir_path)
     outfilepattern = os.path.join(out_dir_path, EZVARS_aux['vert-sti']['subdir-name']['value'] + '-sti-{:>04}.tif')
     zfold = sorted_sub_directories(indir)
     l = len(zfold)
     tmp = glob.glob(os.path.join(indir, zfold[0], EZVARS_aux['vert-sti']['subdir-name']['value'], '*.tif'))
-    J = range((EZVARS_aux['vert-sti']['stop']['value'] - EZVARS_aux['vert-sti']['start']['value']) //
+    J = range((local_stop - EZVARS_aux['vert-sti']['start']['value']) //
               EZVARS_aux['vert-sti']['step']['value'])
     pool = mp.Pool(processes=mp.cpu_count())
     exec_func = partial(exec_conc_mp, tmp[0], l, zfold, indir, outfilepattern, indtype)
