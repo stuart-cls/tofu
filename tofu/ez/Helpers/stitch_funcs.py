@@ -129,6 +129,26 @@ def validate_slice_range():
 def load_an_image_from_the_input_dir(input_dir, slice_dir):
     return 0
 
+def rmtree_pruning_empty_parents(path, root):
+    """Remove *path* (if it is a directory), then remove any parent directories
+    that become empty as a result, stopping at (and keeping) *root*.
+
+    Needed for nested CT-set layouts (e.g. ``S1/1_001``): removing only the leaf
+    tmp dir would leave the now-empty intermediate dirs (``S1``) behind.
+    """
+    if not os.path.isdir(path):
+        return
+    shutil.rmtree(path)
+    root_abs = os.path.abspath(root)
+    current = os.path.dirname(os.path.abspath(path))
+    while current != root_abs and current.startswith(root_abs + os.sep):
+        if os.path.isdir(current) and not os.listdir(current):
+            os.rmdir(current)
+            current = os.path.dirname(current)
+        else:
+            break
+
+
 def main_sti_mp():
     if not os.path.exists(EZVARS_aux['vert-sti']['output-dir']['value']):
         os.makedirs(EZVARS_aux['vert-sti']['output-dir']['value'])
@@ -165,7 +185,9 @@ def main_sti_mp():
                 for dir in os.listdir(tmp_root_dir):
                     shutil.rmtree(os.path.join(tmp_root_dir, dir))
             else:
-                shutil.rmtree(tmpdir)
+                # Remove the leaf tmp dir and any intermediate dirs (e.g. "S1"
+                # in a nested "S1/1_001" layout) that are left empty.
+                rmtree_pruning_empty_parents(tmpdir, tmp_root_dir)
 
 
 def sti_one_set(in_dir_path, tmp_dir_path, out_dir_path):

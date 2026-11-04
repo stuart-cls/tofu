@@ -16,10 +16,26 @@ def batch_stitch():
         print("# Clean directory for stitched data")
         return 1
 
+    # Preserve the full input directory structure under stitched-data so that
+    # CT sets sharing a basename but living in different samples don't collide.
+    # Using only the basename would flatten e.g. S1/1_001 and S2/1_001 into a
+    # single 1_001 dir and let the second sample overwrite the first.
+    input_root = os.path.abspath(EZVARS['inout']['input-dir']['value'])
+
     print(EZVARS_aux['axes-list'])
     for outscandir, innerloopdict in EZVARS_aux['axes-list'].items():
         print(f"# Stitching half acq mode data in {outscandir}")
-        outscandir_out = os.path.join(stitched_data_dir_name, os.path.basename(outscandir))
+        outscandir_rel = os.path.relpath(outscandir, start=input_root)
+        if outscandir_rel == os.curdir:
+            # The CT set is the input root itself (single-sample layout where
+            # the input dir is one CT set); use the basename as before.
+            outscandir_rel = os.path.basename(outscandir)
+        elif outscandir_rel == os.pardir or outscandir_rel.startswith(os.pardir + os.sep):
+            # outscandir is not under the input root (e.g. params loaded from a
+            # different machine); fall back to the basename to avoid escaping
+            # out of stitched-data.
+            outscandir_rel = os.path.basename(outscandir)
+        outscandir_out = os.path.join(stitched_data_dir_name, outscandir_rel)
         if not os.path.exists(outscandir_out):
             os.makedirs(outscandir_out)
         # Export the parameters used to get stitched-data
