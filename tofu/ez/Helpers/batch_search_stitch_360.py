@@ -1,7 +1,7 @@
 from tofu.ez.ctdir_walker import substitute_shared_flatsdarks
 from tofu.ez.params import EZVARS_aux, EZVARS
 import os
-from tofu.ez.util import add_value_to_dict_entry, get_fd_names, export_values
+from tofu.ez.util import add_value_to_dict_entry, get_fd_names, export_values, relpath_under_root
 from tofu.ez.Helpers.stitch_funcs import main_360sti_ufol_depth1, compute_crop
 from tofu.ez.Helpers.find_360_overlap import find_overlap
 from tofu.util import get_first_filename, get_image_shape
@@ -25,16 +25,7 @@ def batch_stitch():
     print(EZVARS_aux['axes-list'])
     for outscandir, innerloopdict in EZVARS_aux['axes-list'].items():
         print(f"# Stitching half acq mode data in {outscandir}")
-        outscandir_rel = os.path.relpath(outscandir, start=input_root)
-        if outscandir_rel == os.curdir:
-            # The CT set is the input root itself (single-sample layout where
-            # the input dir is one CT set); use the basename as before.
-            outscandir_rel = os.path.basename(outscandir)
-        elif outscandir_rel == os.pardir or outscandir_rel.startswith(os.pardir + os.sep):
-            # outscandir is not under the input root (e.g. params loaded from a
-            # different machine); fall back to the basename to avoid escaping
-            # out of stitched-data.
-            outscandir_rel = os.path.basename(outscandir)
+        outscandir_rel = relpath_under_root(outscandir, input_root)
         outscandir_out = os.path.join(stitched_data_dir_name, outscandir_rel)
         if not os.path.exists(outscandir_out):
             os.makedirs(outscandir_out)

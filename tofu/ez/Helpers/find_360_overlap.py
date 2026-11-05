@@ -18,7 +18,7 @@ from tofu.ez.ufo_cmd_gen import get_filter2d_sinos_cmd
 #from tofu.ez.find_axis_cmd_gen import evaluate_images_simp
 from tofu.ez.evaluate_sharpness import evaluate_metrics_360_olap_search
 from tofu.ez.Helpers.stitch_funcs import main_360sti_ufol_depth1
-from tofu.ez.util import get_dims, get_fd_names
+from tofu.ez.util import get_dims, get_fd_names, relpath_under_root
 from tofu.ez.ufo_cmd_gen import get_pre_cmd
 from tofu.ez.tofu_cmd_gen import fmt_pr_cmd
 
@@ -63,10 +63,9 @@ def find_overlap():
         dirflats = EZVARS['inout']['path2-shared-flats']['value']
         dirflats2 = EZVARS['inout']['path2-shared-flats2']['value']
 
-    sin_tmp_dir = os.path.join(EZVARS_aux['find360olap']['tmp-dir']['value'], 'sinos')
-    if not os.path.exists(sin_tmp_dir):
-        os.makedirs(sin_tmp_dir)
-
+    # Preserve the full input directory structure under the workdir so that
+    # CT sets sharing a basename but living in different samples don't collide
+    input_root = os.path.abspath(EZVARS_aux['find360olap']['input-dir']['value'])
 
     ax_range = range(EZVARS_aux['find360olap']['start']['value'],
                      EZVARS_aux['find360olap']['stop']['value'] + EZVARS_aux['find360olap']['step']['value'],
@@ -80,21 +79,26 @@ def find_overlap():
         if outerloopdirname not in EZVARS_aux['axes-list']:
             EZVARS_aux['axes-list'].update({outerloopdirname: {}})
         index_dir = os.path.basename(os.path.normpath(ctset))
+        ctset_rel = os.path.join(relpath_under_root(outerloopdirname, input_root), index_dir)
+        scan_tmp_dir = os.path.join(EZVARS_aux['find360olap']['tmp-dir']['value'], ctset_rel)
+        sin_tmp_dir = os.path.join(scan_tmp_dir, 'sinos')
+        if not os.path.exists(sin_tmp_dir):
+            os.makedirs(sin_tmp_dir)
         print(f"Generating slices for ctset {index_dir}")
         e = 0
         if EZVARS_aux['find360olap']['doPR']['value']:
-            e = make_sinos_PR(ctset, dirflats, dirdark, dirflats2, ax_range, sin_tmp_dir)
+            e = make_sinos_PR(ctset, dirflats, dirdark, dirflats2, ax_range, sin_tmp_dir, scan_tmp_dir)
         else:
             e = make_sinos_noPR(ctset, dirflats, dirdark, dirflats2, ax_range, sin_tmp_dir)
         if e:
             print("Cannot create sinograms; continue with the next ct set")
             continue
 
-        outname = do_reco(sin_tmp_dir, index_dir, ax_range)
+        outname = do_reco(sin_tmp_dir, scan_tmp_dir, ctset_rel, index_dir, ax_range)
 
         # estimating overlap
         mettxtpref = os.path.join(os.path.join(
-            EZVARS_aux['find360olap']['output-dir']['value'], index_dir))
+            EZVARS_aux['find360olap']['output-dir']['value'], ctset_rel))
 
 
         results = evaluate_metrics_360_olap_search(os.path.dirname(outname), mettxtpref, ax_range,
@@ -181,16 +185,16 @@ def make_sinos_noPR(ctset, dirflats, dirdark, dirflats2, ax_range, sin_tmp_dir):
     return 0
 
 
-def do_reco(sin_tmp_dir, index_dir, ax_range):
+def do_reco(sin_tmp_dir, scan_tmp_dir, ctset_rel, index_dir, ax_range):
     if EZVARS_aux['find360olap']['doRR']['value']:
-        sinfilt_tmp_dir = os.path.join(EZVARS_aux['find360olap']['tmp-dir']['value'], 'sinos-filt')
+        sinfilt_tmp_dir = os.path.join(scan_tmp_dir, 'sinos-filt')
         if not os.path.exists(sinfilt_tmp_dir):
             os.makedirs(sinfilt_tmp_dir)
     # formatting reco command
     sin_width = get_image_shape(get_filenames(sin_tmp_dir)[0])[-1]
     sin_height = get_image_shape(get_filenames(sin_tmp_dir)[0])[-2]
     outname = os.path.join(os.path.join(
-        EZVARS_aux['find360olap']['output-dir']['value'], index_dir, f"{index_dir}-sli"))
+        EZVARS_aux['find360olap']['output-dir']['value'], ctset_rel, f"{index_dir}-sli"))
     # old command
     # cmd = f'tofu tomo --axis {sin_width // 2} --output {os.path.join(outname)}'
     # new command to enable slice crop
@@ -199,7 +203,7 @@ def do_reco(sin_tmp_dir, index_dir, ax_range):
     cmd = f'tofu sinos --number {nsli}'
     if EZVARS_aux['find360olap']['doRR']['value']:
         print("Applying ring removal filter")
-        rrcmd = get_filter2d_sinos_cmd(EZVARS_aux['find360olap']['tmp-dir']['value'],
+        rrcmd = get_filter2d_sinos_cmd(scan_tmp_dir,
                                        EZVARS['RR']['sx']['value'],
                                        EZVARS['RR']['sy']['value'],
                                        sin_height, sin_width)
@@ -207,7 +211,7 @@ def do_reco(sin_tmp_dir, index_dir, ax_range):
         cmd += f' --projections {sinfilt_tmp_dir}'
     else:
         cmd += f' --projections {sin_tmp_dir}'
-    proj_file_name = os.path.join(EZVARS_aux['find360olap']['tmp-dir']['value'], 'proj.tif')
+    proj_file_name = os.path.join(scan_tmp_dir, 'proj.tif')
     cmd += f" --output {proj_file_name}"
     os.system(cmd)
     # now the reco command
@@ -221,8 +225,8 @@ def do_reco(sin_tmp_dir, index_dir, ax_range):
     os.system(cmd)
     return outname
 
-def make_sinos_PR(ctset, dirflats, dirdark, dirflats2, ax_range, sin_tmp_dir):
-    path2crop_frames = os.path.join(EZVARS_aux['find360olap']['tmp-dir']['value'], 'vertcrop')
+def make_sinos_PR(ctset, dirflats, dirdark, dirflats2, ax_range, sin_tmp_dir, scan_tmp_dir):
+    path2crop_frames = os.path.join(scan_tmp_dir, 'vertcrop')
     mrg = 32 # hardcoding the margins to avoid boundary artifacts when retrieving phase for one row
     nviews, wh = validate_row(mrg, ctset, EZVARS['inout']['tomo-dir']['value'])
     pre_cmd = f"crop y={EZVARS_aux['find360olap']['row']['value'] - mrg + 1} height={2*mrg}"
@@ -242,7 +246,7 @@ def make_sinos_PR(ctset, dirflats, dirdark, dirflats2, ax_range, sin_tmp_dir):
         cro = EZVARS_aux['find360olap']['stop']['value'] - axis
         if axis > wh[1] // 2:
             cro = axis - EZVARS_aux['find360olap']['start']['value']
-        stitched = os.path.join(EZVARS_aux['find360olap']['tmp-dir']['value'], 'stitched', f"{axis:04}")
+        stitched = os.path.join(scan_tmp_dir, 'stitched', f"{axis:04}")
         print(f"Stitching flats/darks/tomo")
         main_360sti_ufol_depth1(path2crop_frames, stitched, axis, cro,
                                 reduction_mode=reduction_mode,
@@ -254,7 +258,7 @@ def make_sinos_PR(ctset, dirflats, dirdark, dirflats2, ax_range, sin_tmp_dir):
             os.path.join(stitched, 'proj-step1'),
             os.path.join(stitched, dirflats2) if os.path.exists(os.path.join(stitched, dirflats2)) else None
         )
-        stitched_pr = os.path.join(EZVARS_aux['find360olap']['tmp-dir']['value'], 'stitched-pr', f"{axis:04}")
+        stitched_pr = os.path.join(scan_tmp_dir, 'stitched-pr', f"{axis:04}")
         out_pattern = os.path.join(stitched_pr, "proj-%04i.tif")
         print(f"Phase retrieval")
         cmd = fmt_pr_cmd(*dirs, out_pattern, reduction_mode=reduction_mode)

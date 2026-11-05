@@ -171,6 +171,17 @@ def enquote(string, escape=False):
 
     return addition + string + addition
 
+def relpath_under_root(path, root):
+    """Return *path* relative to *root*, preserving the full directory
+    structure under *root* so that entries sharing a basename but living in
+    different samples don't collide. Falls back to the basename when *path*
+    is *root* itself (single-sample layout) or not under *root* (e.g. params
+    loaded from a different machine), so the result never escapes *root*."""
+    rel = os.path.relpath(path, start=root)
+    if rel == os.curdir or rel == os.pardir or rel.startswith(os.pardir + os.sep):
+        return os.path.basename(os.path.normpath(path))
+    return rel
+
 def extract_values_from_dict(dict):
     """Return a list of values to be saved as a text file"""
     new_dict = {}
