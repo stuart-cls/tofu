@@ -17,7 +17,7 @@ from tofu.util import get_filenames, get_image_shape, TiffSequenceReader
 from tofu.ez.ufo_cmd_gen import get_filter2d_sinos_cmd
 #from tofu.ez.find_axis_cmd_gen import evaluate_images_simp
 from tofu.ez.evaluate_sharpness import evaluate_metrics_360_olap_search
-from tofu.ez.Helpers.stitch_funcs import main_360sti_ufol_depth1
+from tofu.ez.Helpers.stitch_funcs import main_360sti_ufol_depth1, remove_dataset_tmp
 from tofu.ez.util import get_dims, get_fd_names, relpath_under_root
 from tofu.ez.ufo_cmd_gen import get_pre_cmd
 from tofu.ez.tofu_cmd_gen import fmt_pr_cmd
@@ -73,6 +73,9 @@ def find_overlap():
 
     # flush records from previous run
     EZVARS_aux['axes-list'] = {}
+
+    keep_tmp_dir = EZVARS['inout']['keep-tmp']['value']
+    tmp_root_dir = EZVARS_aux['find360olap']['tmp-dir']['value']
     # concatenate images with various overlap and generate sinograms
     for ctset in ctdirs:
         outerloopdirname = os.path.dirname(ctset)
@@ -92,6 +95,8 @@ def find_overlap():
             e = make_sinos_noPR(ctset, dirflats, dirdark, dirflats2, ax_range, sin_tmp_dir)
         if e:
             print("Cannot create sinograms; continue with the next ct set")
+            if not keep_tmp_dir and os.path.isdir(scan_tmp_dir):
+                remove_dataset_tmp(scan_tmp_dir, tmp_root_dir)
             continue
 
         outname = do_reco(sin_tmp_dir, scan_tmp_dir, ctset_rel, index_dir, ax_range)
@@ -115,8 +120,9 @@ def find_overlap():
         EZVARS_aux['axes-list'][outerloopdirname].update({index_dir: olap_est})
         olap_estimates.append(olap_est)
         print("****************************************")
+        if not keep_tmp_dir and os.path.isdir(scan_tmp_dir):
+            remove_dataset_tmp(scan_tmp_dir, tmp_root_dir)
 
-    #shutil.rmtree(EZVARS_aux['find360olap']['tmp-dir'])
     print("Finished processing of all subdirectories in " + str(EZVARS_aux['find360olap']['input-dir']['value']))
     return dict(zip(ctdirs, olap_estimates))
 

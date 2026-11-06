@@ -156,6 +156,20 @@ def rmtree_pruning_empty_parents(path, root):
             break
 
 
+def remove_dataset_tmp(tmpdir, tmp_root_dir):
+    """Remove a dataset's tmp dir *tmpdir*, and any intermediate dirs left
+    empty, stopping at (and keeping) *tmp_root_dir*.
+
+    When *tmpdir* is the tmp root itself (single-dataset layout), the
+    root's contents are cleared instead.
+    """
+    if os.path.samefile(tmp_root_dir, tmpdir):
+        for dir in os.listdir(tmp_root_dir):
+            shutil.rmtree(os.path.join(tmp_root_dir, dir))
+    else:
+        rmtree_pruning_empty_parents(tmpdir, tmp_root_dir)
+
+
 def main_sti_mp():
     if not os.path.exists(EZVARS_aux['vert-sti']['output-dir']['value']):
         os.makedirs(EZVARS_aux['vert-sti']['output-dir']['value'])
@@ -188,13 +202,7 @@ def main_sti_mp():
             os.makedirs(outdir)
         stitch_func(vert_set, tmpdir, outdir)
         if not keep_tmp_dir and os.path.isdir(tmpdir):
-            if os.path.samefile(tmp_root_dir, tmpdir):
-                for dir in os.listdir(tmp_root_dir):
-                    shutil.rmtree(os.path.join(tmp_root_dir, dir))
-            else:
-                # Remove the leaf tmp dir and any intermediate dirs (e.g. "S1"
-                # in a nested "S1/1_001" layout) that are left empty.
-                rmtree_pruning_empty_parents(tmpdir, tmp_root_dir)
+            remove_dataset_tmp(tmpdir, tmp_root_dir)
 
 
 def sti_one_set(in_dir_path, tmp_dir_path, out_dir_path):
